@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ヨミトリ</title>
+<meta name="theme-color" content="#1f3b63">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ヨミトリ">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#18212e; --muted:#5f6b7c; --line:#dde3ea;
+  --accent:#1f3b63; --accent-ink:#ffffff; --accent-soft:#e3eaf4; --hl:#d9822b;
+  --danger:#b3261e; --ok:#2e7d4f;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#10151c; --surface:#18202a; --ink:#e7ecf2; --muted:#98a4b3; --line:#2a3542;
+    --accent:#8fb3e6; --accent-ink:#0e1826; --accent-soft:#223249; --hl:#f0a55a;
+    --danger:#ff8a80; --ok:#7fd1a0;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.6 -apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic UI",Meiryo,sans-serif;
+  -webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
+button,input,select{font:inherit;color:inherit}
+a{color:inherit}
+.wrap{max-width:720px;margin:0 auto;padding-inline:16px}
+
+/* header */
+header{position:sticky;top:0;z-index:5;background:var(--bg);
+  padding-top:env(safe-area-inset-top,0px);border-bottom:1px solid var(--line)}
+.bar{display:flex;align-items:center;gap:10px;padding-block:10px}
+.logo{font-weight:800;font-size:19px;letter-spacing:.02em;flex:1;display:flex;align-items:center;gap:8px}
+.logo i{width:10px;height:10px;border-radius:50%;background:var(--hl);display:inline-block}
+.iconbtn{border:1px solid var(--line);background:var(--surface);border-radius:10px;
+  height:38px;min-width:38px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer}
+.iconbtn:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--hl);outline-offset:2px}
+.iconbtn svg{width:18px;height:18px}
+.spin svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin svg{animation:none}}
+
+.search{display:flex;gap:8px;padding-bottom:10px}
+.search input{flex:1;min-width:0;height:40px;border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:0 12px}
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:10px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 12px;font-size:13px;cursor:pointer;white-space:nowrap}
+.chip[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.chip b{font-weight:700;margin-left:4px;font-variant-numeric:tabular-nums;opacity:.8}
+
+main{padding-bottom:calc(84px + env(safe-area-inset-bottom,0px))}
+.status{font-size:12px;color:var(--muted);padding-block:8px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.status button{border:0;background:none;color:var(--accent);padding:0;cursor:pointer;font-size:12px}
+
+/* items */
+.list{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.item{display:flex;gap:6px;border-bottom:1px solid var(--line)}
+.item:last-child{border-bottom:0}
+.item a{flex:1;min-width:0;text-decoration:none;padding:12px 0 12px 14px;display:flex;flex-direction:column;gap:3px}
+.meta{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center;min-width:0}
+.meta span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--hl);flex:none}
+.item .t{font-weight:700;line-height:1.45;overflow-wrap:anywhere}
+.item.read .t{font-weight:400;color:var(--muted)}
+.item.read .dot{visibility:hidden}
+.item .s{font-size:13px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.star{flex:none;width:48px;border:0;background:none;cursor:pointer;color:var(--muted);display:flex;align-items:flex-start;justify-content:center;padding-top:14px}
+.star svg{width:20px;height:20px}
+.star[aria-pressed="true"]{color:var(--hl)}
+.star[aria-pressed="true"] svg path{fill:currentColor}
+
+.empty{text-align:center;color:var(--muted);padding:40px 16px;font-size:14px}
+.empty strong{display:block;color:var(--ink);font-size:16px;margin-bottom:4px}
+
+.searchcta{display:flex;align-items:center;gap:10px;justify-content:space-between;background:var(--accent-soft);border-radius:12px;padding:10px 12px;margin-bottom:10px;font-size:14px;flex-wrap:wrap}
+
+/* forms / manage */
+h2{font-size:13px;letter-spacing:.08em;color:var(--muted);margin:22px 0 8px;font-weight:700}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:3px;gap:3px}
+.seg button{border:0;border-radius:8px;background:none;padding:7px;cursor:pointer;font-size:14px}
+.seg button[aria-pressed="true"]{background:var(--surface);font-weight:700;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+label{font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+.field{height:42px;border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:0 12px;width:100%}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>*{flex:1;min-width:120px}
+.btn{height:42px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-ink);font-weight:700;padding:0 16px;cursor:pointer}
+.btn.sub{background:var(--accent-soft);color:var(--ink)}
+.btn:disabled{opacity:.55}
+.hint{font-size:12px;color:var(--muted);margin:0}
+.msg{font-size:13px;margin:0}
+.msg.err{color:var(--danger)} .msg.ok{color:var(--ok)}
+.feeds{display:flex;flex-direction:column}
+.feed{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.feed:last-child{border-bottom:0}
+.feed .info{flex:1;min-width:0}
+.feed .n{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.feed .u{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{font-size:11px;border-radius:6px;padding:1px 6px;background:var(--accent-soft);margin-right:6px;font-weight:700}
+.feed .e{font-size:12px;color:var(--danger)}
+.del{border:1px solid var(--line);background:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:13px;flex:none}
+.del.confirm{border-color:var(--danger);color:var(--danger);font-weight:700}
+.toggle{display:flex;flex-direction:row;align-items:center;justify-content:space-between;color:var(--ink);font-size:14px}
+.toggle input{width:22px;height:22px;accent-color:var(--accent)}
+
+/* bottom nav */
+nav{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--surface);border-top:1px solid var(--line);
+  padding-bottom:env(safe-area-inset-bottom,0px)}
+nav .wrap{display:grid;grid-template-columns:repeat(3,1fr)}
+nav button{border:0;background:none;padding:8px 0 10px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--muted);cursor:pointer}
+nav button svg{width:22px;height:22px}
+nav button[aria-current="page"]{color:var(--accent);font-weight:700}
+
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(80px + env(safe-area-inset-bottom,0px));
+  background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:10px;font-size:13px;z-index:9;max-width:calc(100% - 32px)}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="bar">
+      <div class="logo"><i></i>ヨミトリ</div>
+      <button class="iconbtn" id="refreshBtn" aria-label="更新">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
+      </button>
+    </div>
+    <div id="headExtra"></div>
+  </div>
+</header>
+
+<main><div class="wrap" id="view"></div></main>
+
+<nav>
+  <div class="wrap">
+    <button data-tab="feed" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 11a8 8 0 0 1 8 8M5 5a14 14 0 0 1 14 14"/><circle cx="6" cy="18" r="1.5" fill="currentColor"/></svg>新着
+    </button>
+    <button data-tab="stars">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>お気に入り
+    </button>
+    <button data-tab="manage">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/><path d="M19 15v6M16 18h6"/></svg>フィード管理
+    </button>
+  </div>
+</nav>
+
+<script>
+"use strict";
+/* ============ 設定 ============ */
+const LIMIT_PER_FEED = 80;
+const AUTO_REFRESH_MIN = 15;
+const PROXIES = [
+  u => u,                                                          // 直接（CORS許可のあるフィード）
+  u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+  u => "https://corsproxy.io/?url=" + encodeURIComponent(u),
+  u => "https://api.codetabs.com/v1/proxy/?quest=" + encodeURIComponent(u),
+];
+
+/* ============ 状態 ============ */
+const S = {
+  feeds: [], cache: {}, read: [], stars: {},
+  prefs: { unreadOnly: false, customProxy: "", proxyIdx: 1 },
+  lastRefresh: 0
+};
+let readSet = new Set();
+let tab = "feed", filterFeed = "all", query = "", busy = false;
+let searchResult = null; // {q, lang, items, loading, error}
+
+function load(){
+  try{
+    const raw = localStorage.getItem("yomitori");
+    if(raw){ Object.assign(S, JSON.parse(raw)); S.prefs = Object.assign({unreadOnly:false,customProxy:"",proxyIdx:1}, S.prefs); }
+    else seed();
+  }catch(e){ seed(); }
+  readSet = new Set(S.read || []);
+}
+function save(){
+  S.read = [...readSet].slice(-4000);
+  try{ localStorage.setItem("yomitori", JSON.stringify(S)); }catch(e){ toast("保存できませんでした（ストレージ容量）"); }
+}
+function seed(){
+  S.feeds = [
+    { id: uid(), type: "keyword", name: "医療DX", q: "医療DX", lang: "ja", url: gnews("医療DX","ja") },
+    { id: uid(), type: "url", name: "NHKニュース 主要", url: "https://www3.nhk.or.jp/rss/news/cat0.xml" }
+  ];
+}
+function uid(){ return Math.random().toString(36).slice(2,10); }
+function gnews(q, lang){
+  return lang === "en"
+    ? "https://news.google.com/rss/search?q=" + encodeURIComponent(q) + "&hl=en-US&gl=US&ceid=US:en"
+    : "https://news.google.com/rss/search?q=" + encodeURIComponent(q) + "&hl=ja&gl=JP&ceid=JP:ja";
+}
+
+/* ============ 取得・解析 ============ */
+async function fetchText(url){
+  const order = [];
+  if(S.prefs.customProxy.trim()){
+    const tpl = S.prefs.customProxy.trim();
+    order.push({i:-1, f: u => tpl.includes("{url}") ? tpl.replace("{url}", encodeURIComponent(u)) : tpl + encodeURIComponent(u)});
+  }
+  const pref = S.prefs.proxyIdx || 0;
+  order.push({i:pref, f:PROXIES[pref]});
+  PROXIES.forEach((f,i) => { if(i !== pref) order.push({i, f}); });
+  let lastErr;
+  for(const p of order){
+    const ctl = new AbortController();
+    const tm = setTimeout(() => ctl.abort(), 12000);
+    try{
+      const res = await fetch(p.f(url), { signal: ctl.signal, cache: "no-store" });
+      clearTimeout(tm);
+      if(!res.ok) throw new Error("HTTP " + res.status);
+      const txt = await res.text();
+      if(!txt || txt.length < 40) throw new Error("空の応答");
+      if(p.i >= 0 && p.i !== S.prefs.proxyIdx){ S.prefs.proxyIdx = p.i; }
+      return txt;
+    }catch(e){ clearTimeout(tm); lastErr = e; }
+  }
+  throw lastErr || new Error("取得失敗");
+}
+
+function kids(el, names){
+  const out = [];
+  for(const c of el.children){ if(names.includes(c.localName)) out.push(c); }
+  return out;
+}
+function kid(el, names){ return kids(el, names)[0] || null; }
+function txt(el){ return el ? el.textContent.trim() : ""; }
+function strip(html){
+  if(!html) return "";
+  const d = new DOMParser().parseFromString(html, "text/html");
+  return (d.body ? d.body.textContent : "").replace(/\s+/g, " ").trim();
+}
+
+function parseFeed(text, baseUrl){
+  const xml = new DOMParser().parseFromString(text, "application/xml");
+  if(xml.getElementsByTagName("parsererror").length) return null;
+  const root = xml.documentElement;
+  const rn = root.localName;
+  let title = "", entries = [];
+  if(rn === "rss" || rn === "RDF"){
+    const ch = kid(root, ["channel"]);
+    title = ch ? txt(kid(ch, ["title"])) : "";
+    entries = [...(ch ? kids(ch, ["item"]) : []), ...kids(root, ["item"])].map(it => {
+      const link = txt(kid(it, ["link"])) || (kid(it,["guid"]) && txt(kid(it,["guid"])).startsWith("http") ? txt(kid(it,["guid"])) : "");
+      return {
+        title: strip(txt(kid(it, ["title"]))),
+        link,
+        date: txt(kid(it, ["pubDate", "date", "published", "updated"])),
+        summary: txt(kid(it, ["description", "encoded", "summary"])),
+        source: txt(kid(it, ["source"]))
+      };
+    });
+  }else if(rn === "feed"){
+    title = txt(kid(root, ["title"]));
+    entries = kids(root, ["entry"]).map(it => {
+      const links = kids(it, ["link"]);
+      const alt = links.find(l => (l.getAttribute("rel")||"alternate") === "alternate") || links[0];
+      return {
+        title: strip(txt(kid(it, ["title"]))),
+        link: alt ? alt.getAttribute("href") : "",
+        date: txt(kid(it, ["published", "updated"])),
+        summary: txt(kid(it, ["summary", "content"])),
+        source: ""
+      };
+    });
+  }else return null;
+
+  const items = entries.filter(e => e.title || e.link).map(e => {
+    let link = e.link;
+    try{ link = new URL(link, baseUrl).href; }catch(_){}
+    let sum = strip(e.summary);
+    if(sum && e.title && sum.startsWith(e.title.slice(0, 20))) sum = "";
+    const t = Date.parse(e.date);
+    return { id: link || e.title, title: e.title || "(無題)", link, ts: isNaN(t) ? 0 : t,
+             summary: sum.slice(0, 200), source: e.source };
+  });
+  return { title: strip(title), items };
+}
+
+function discover(html, pageUrl){
+  const d = new DOMParser().parseFromString(html, "text/html");
+  const l = d.querySelector('link[rel~="alternate"][type*="rss"], link[rel~="alternate"][type*="atom"], link[rel~="alternate"][type*="rdf"]');
+  if(!l) return null;
+  try{ return new URL(l.getAttribute("href"), pageUrl).href; }catch(e){ return null; }
+}
+
+async function loadFeedUrl(url){
+  const text = await fetchText(url);
+  let parsed = parseFeed(text, url);
+  if(parsed) return { feedUrl: url, ...parsed };
+  const found = discover(text, url);
+  if(!found) throw new Error("RSS/Atomフィードが見つかりません");
+  const t2 = await fetchText(found);
+  parsed = parseFeed(t2, found);
+  if(!parsed) throw new Error("フィードを解析できません");
+  return { feedUrl: found, ...parsed };
+}
+
+function storeItems(feed, items){
+  const prev = (S.cache[feed.id] && S.cache[feed.id].items) || [];
+  const map = new Map();
+  [...items, ...prev].forEach(it => { if(!map.has(it.id)) map.set(it.id, it); });
+  const merged = [...map.values()].sort((a,b) => b.ts - a.ts).slice(0, LIMIT_PER_FEED);
+  S.cache[feed.id] = { items: merged, at: Date.now(), err: "" };
+}
+
+async function refreshAll(){
+  if(busy || !S.feeds.length) return;
+  busy = true; setBusy(true);
+  let done = 0, fail = 0;
+  const queue = [...S.feeds];
+  async function worker(){
+    while(queue.length){
+      const f = queue.shift();
+      try{
+        const r = await loadFeedUrl(f.url);
+        storeItems(f, r.items);
+      }catch(e){
+        fail++;
+        S.cache[f.id] = Object.assign({ items: [] }, S.cache[f.id], { err: String(e.message || e) });
+      }
+      done++;
+      statusText = `更新中… ${done}/${S.feeds.length}`;
+      if(tab === "feed") renderStatus();
+    }
+  }
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  S.lastRefresh = Date.now();
+  busy = false; setBusy(false);
+  statusText = "";
+  save();
+  if(fail) toast(`${fail}件のフィードを取得できませんでした`);
+  render();
+}
+function setBusy(b){ document.getElementById("refreshBtn").classList.toggle("spin", b); }
+
+/* ============ 表示ヘルパ ============ */
+let statusText = "";
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function ago(ts){
+  if(!ts) return "";
+  const m = Math.floor((Date.now() - ts) / 60000);
+  if(m < 1) return "たった今";
+  if(m < 60) return m + "分前";
+  const h = Math.floor(m / 60);
+  if(h < 24) return h + "時間前";
+  const d = Math.floor(h / 24);
+  if(d < 7) return d + "日前";
+  const dt = new Date(ts);
+  return `${dt.getFullYear()}/${dt.getMonth()+1}/${dt.getDate()}`;
+}
+function toast(msg){
+  const t = document.createElement("div");
+  t.className = "toast"; t.textContent = msg; t.setAttribute("role","status");
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+const STAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z"/></svg>';
+function feedName(id){ const f = S.feeds.find(x => x.id === id); return f ? f.name : ""; }
+
+function itemHTML(it){
+  const read = readSet.has(it.id);
+  const starred = !!S.stars[it.id];
+  const src = it.source || feedName(it.feedId) || it.feedName || "";
+  return `<div class="item${read ? " read" : ""}" data-id="${esc(it.id)}">
+    <a href="${esc(it.link)}" target="_blank" rel="noopener">
+      <div class="meta"><i class="dot"></i><span>${esc(src)}</span><span>${esc(ago(it.ts))}</span></div>
+      <div class="t">${esc(it.title)}</div>
+      ${it.summary ? `<div class="s">${esc(it.summary)}</div>` : ""}
+    </a>
+    <button class="star" aria-pressed="${starred}" aria-label="お気に入り">${STAR}</button>
+  </div>`;
+}
+
+function allItems(){
+  const out = [];
+  for(const f of S.feeds){
+    const c = S.cache[f.id];
+    if(!c) continue;
+    for(const it of c.items) out.push(Object.assign({ feedId: f.id }, it));
+  }
+  return out;
+}
+function unreadCount(fid){
+  const c = S.cache[fid]; if(!c) return 0;
+  return c.items.filter(i => !readSet.has(i.id)).length;
+}
+
+/* ============ 画面 ============ */
+const view = document.getElementById("view");
+const headExtra = document.getElementById("headExtra");
+
+function render(){
+  document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false"));
+  if(tab === "feed") renderFeed();
+  else if(tab === "stars") renderStars();
+  else renderManage();
+}
+
+function renderHeadFeed(){
+  const allUnread = S.feeds.reduce((n,f) => n + unreadCount(f.id), 0);
+  headExtra.innerHTML = `
+    <div class="search">
+      <input id="q" type="search" placeholder="記事を絞り込み／キーワードでニュース検索" value="${esc(query)}" enterkeyhint="search" autocomplete="off">
+    </div>
+    <div class="chips" id="chips">
+      <button class="chip" data-f="all" aria-pressed="${filterFeed==="all"}">すべて<b>${allUnread}</b></button>
+      ${S.feeds.map(f => `<button class="chip" data-f="${f.id}" aria-pressed="${filterFeed===f.id}">${esc(f.name)}<b>${unreadCount(f.id)}</b></button>`).join("")}
+    </div>`;
+  const q = document.getElementById("q");
+  q.addEventListener("input", () => { query = q.value; searchResult = null; renderFeedBody(); });
+  q.addEventListener("keydown", e => { if(e.key === "Enter"){ e.preventDefault(); if(query.trim()) runSearch(query.trim(), "ja"); q.blur(); } });
+  document.getElementById("chips").addEventListener("click", e => {
+    const b = e.target.closest(".chip"); if(!b) return;
+    filterFeed = b.dataset.f; renderFeed();
+  });
+}
+
+function renderFeed(){
+  renderHeadFeed();
+  renderFeedBody();
+}
+function renderStatus(){
+  const el = document.getElementById("status");
+  if(!el) return;
+  const left = statusText || (S.lastRefresh ? "最終更新 " + ago(S.lastRefresh) : "未更新");
+  el.innerHTML = `<span>${esc(left)}</span>
+    <span style="display:flex;gap:14px"><button id="unreadTg">${S.prefs.unreadOnly ? "すべて表示" : "未読のみ"}</button><button id="markAll">表示中を既読に</button></span>`;
+  document.getElementById("unreadTg").onclick = () => { S.prefs.unreadOnly = !S.prefs.unreadOnly; save(); renderFeedBody(); };
+  document.getElementById("markAll").onclick = () => { currentList.forEach(i => readSet.add(i.id)); save(); renderFeed(); };
+}
+let currentList = [];
+
+function renderFeedBody(){
+  if(searchResult){ renderSearch(); return; }
+  let items = allItems();
+  if(filterFeed !== "all") items = items.filter(i => i.feedId === filterFeed);
+  const ql = query.trim().toLowerCase();
+  if(ql){
+    const words = ql.split(/\s+/);
+    items = items.filter(i => { const h = (i.title + " " + i.summary + " " + (i.source||"")).toLowerCase(); return words.every(w => h.includes(w)); });
+  }
+  if(S.prefs.unreadOnly) items = items.filter(i => !readSet.has(i.id));
+  const seen = new Set();
+  items = items.sort((a,b) => b.ts - a.ts).filter(i => seen.has(i.id) ? false : seen.add(i.id)).slice(0, 400);
+  currentList = items;
+
+  const cta = ql ? `<div class="searchcta"><span>「${esc(query.trim())}」の最新ニュースを検索</span>
+      <span class="row" style="flex:none"><button class="btn" id="goSearch" style="height:36px">検索</button></span></div>` : "";
+
+  let body;
+  if(!S.feeds.length){
+    body = `<div class="empty"><strong>フィードがありません</strong>「フィード管理」からキーワードかURLを追加してください。</div>`;
+  }else if(!items.length){
+    body = `<div class="empty"><strong>${ql ? "一致する記事がありません" : S.prefs.unreadOnly ? "未読はありません" : "記事がまだありません"}</strong>${ql ? "上の「検索」でニュースを探せます。" : "右上の更新ボタンで読み込みます。"}</div>`;
+  }else{
+    body = `<div class="list">${items.map(itemHTML).join("")}</div>`;
+  }
+  view.innerHTML = `<div class="status" id="status"></div>${cta}${body}`;
+  renderStatus();
+  const gs = document.getElementById("goSearch");
+  if(gs) gs.onclick = () => runSearch(query.trim(), "ja");
+}
+
+async function runSearch(q, lang){
+  searchResult = { q, lang, items: [], loading: true, error: "" };
+  renderSearch();
+  try{
+    const r = await loadFeedUrl(gnews(q, lang));
+    if(!searchResult || searchResult.q !== q) return;
+    searchResult.items = r.items.sort((a,b) => b.ts - a.ts);
+  }catch(e){
+    if(searchResult) searchResult.error = "検索結果を取得できませんでした。通信状況を確認してもう一度お試しください。";
+  }
+  if(searchResult){ searchResult.loading = false; if(tab === "feed") renderSearch(); }
+}
+
+function renderSearch(){
+  const r = searchResult;
+  const exists = S.feeds.some(f => f.type === "keyword" && f.q === r.q && f.lang === r.lang);
+  let body;
+  if(r.loading) body = `<div class="empty">「${esc(r.q)}」を検索しています…</div>`;
+  else if(r.error) body = `<div class="empty"><strong>取得できませんでした</strong>${esc(r.error)}</div>`;
+  else if(!r.items.length) body = `<div class="empty"><strong>見つかりませんでした</strong>別のキーワードをお試しください。</div>`;
+  else body = `<div class="list">${r.items.map(it => itemHTML(Object.assign({ feedName: "Googleニュース" }, it))).join("")}</div>`;
+  currentList = r.items;
+  view.innerHTML = `
+    <div class="status"><span>「${esc(r.q)}」のニュース検索 ${r.items.length ? r.items.length + "件" : ""}</span>
+      <span style="display:flex;gap:14px">
+        <button id="langTg">${r.lang === "ja" ? "英語で検索" : "日本語で検索"}</button>
+        <button id="backTl">タイムラインに戻る</button></span></div>
+    <div class="searchcta"><span>${exists ? "このキーワードは登録済みです" : "このキーワードを定期チェックしますか？"}</span>
+      ${exists ? "" : `<button class="btn" id="saveKw" style="height:36px">フィードに追加</button>`}</div>
+    ${body}`;
+  document.getElementById("backTl").onclick = () => { searchResult = null; query = ""; renderFeed(); };
+  document.getElementById("langTg").onclick = () => runSearch(r.q, r.lang === "ja" ? "en" : "ja");
+  const sk = document.getElementById("saveKw");
+  if(sk) sk.onclick = () => {
+    const f = { id: uid(), type: "keyword", name: r.q + (r.lang === "en" ? " (EN)" : ""), q: r.q, lang: r.lang, url: gnews(r.q, r.lang) };
+    S.feeds.push(f);
+    if(r.items.length) storeItems(f, r.items);
+    save(); toast("「" + f.name + "」を追加しました");
+    renderHeadFeed(); renderSearch();
+  };
+}
+
+function renderStars(){
+  headExtra.innerHTML = "";
+  const items = Object.values(S.stars).sort((a,b) => (b.starredAt||0) - (a.starredAt||0));
+  currentList = items;
+  view.innerHTML = `<div class="status"><span>お気に入り ${items.length}件</span></div>` + (items.length
+    ? `<div class="list">${items.map(itemHTML).join("")}</div>`
+    : `<div class="empty"><strong>お気に入りはまだありません</strong>記事の☆をタップすると保存されます。</div>`);
+}
+
+let addMode = "keyword";
+function renderManage(){
+  headExtra.innerHTML = "";
+  view.innerHTML = `
+  <h2>フィードを追加</h2>
+  <form class="card" id="addForm" novalidate>
+    <div class="seg" role="group" aria-label="追加方法">
+      <button type="button" data-m="keyword" aria-pressed="${addMode==="keyword"}">キーワード</button>
+      <button type="button" data-m="url" aria-pressed="${addMode==="url"}">URL指定</button>
+    </div>
+    ${addMode === "keyword" ? `
+      <label>キーワード<input class="field" id="kw" placeholder="例：電子カルテ 更新" autocomplete="off"></label>
+      <div class="row">
+        <label>言語<select class="field" id="lang"><option value="ja">日本語ニュース</option><option value="en">英語ニュース</option></select></label>
+        <label>表示名（任意）<input class="field" id="nm" placeholder="空欄ならキーワード"></label>
+      </div>
+      <p class="hint">Googleニュースから新着記事を集めます。スペース区切りで全部含む記事、「OR」でどれかを含む記事、「-語」で除外できます。</p>
+    ` : `
+      <label>URL<input class="field" id="url" type="url" inputmode="url" placeholder="https://example.com/feed または サイトのURL" autocomplete="off"></label>
+      <label>表示名（任意）<input class="field" id="nm" placeholder="空欄ならフィードのタイトル"></label>
+      <p class="hint">RSS/AtomのURLのほか、サイトのトップページURLでもフィードを自動で探します。</p>
+    `}
+    <button class="btn" id="addBtn" type="submit">追加して読み込む</button>
+    <p class="msg" id="addMsg" aria-live="polite"></p>
+  </form>
+
+  <h2>登録中のフィード（${S.feeds.length}）</h2>
+  <div class="card"><div class="feeds">
+    ${S.feeds.length ? S.feeds.map(f => {
+      const c = S.cache[f.id];
+      const sub = f.type === "keyword" ? `Googleニュース・${f.lang === "en" ? "英語" : "日本語"}：${f.q}` : f.url;
+      return `<div class="feed" data-id="${f.id}">
+        <div class="info">
+          <div class="n"><span class="badge">${f.type === "keyword" ? "KW" : "URL"}</span>${esc(f.name)}</div>
+          <div class="u">${esc(sub)}</div>
+          ${c && c.err ? `<div class="e">取得エラー：${esc(c.err)}</div>` : c ? `<div class="u">${c.items.length}件・${esc(ago(c.at))}に取得</div>` : ""}
+        </div>
+        <button class="del" type="button">削除</button>
+      </div>`; }).join("") : `<p class="hint">まだありません。</p>`}
+  </div></div>
+
+  <h2>設定</h2>
+  <div class="card">
+    <label class="toggle">未読の記事だけ表示する<input type="checkbox" id="uo" ${S.prefs.unreadOnly ? "checked" : ""}></label>
+    <label>独自の中継（プロキシ）URL（任意）
+      <input class="field" id="px" value="${esc(S.prefs.customProxy)}" placeholder="https://your-worker.example.workers.dev/?url={url}" autocomplete="off"></label>
+    <p class="hint">フィードは公開の中継サービス経由で取得します。取得が不安定なときは自前の中継URLを指定できます（{url} の位置に記事元URLが入ります）。</p>
+  </div>
+
+  <h2>バックアップ</h2>
+  <div class="card">
+    <div class="row">
+      <button class="btn sub" type="button" id="exp">登録内容をコピー</button>
+      <button class="btn sub" type="button" id="imp">貼り付けて復元</button>
+    </div>
+    <textarea class="field" id="impText" rows="3" style="height:auto;padding:10px" placeholder="コピーしたデータをここに貼り付けて「貼り付けて復元」" hidden></textarea>
+    <p class="hint">別のスマホへの移行用です。フィードとお気に入りが対象です。</p>
+  </div>
+  <p class="hint" style="margin-top:18px;text-align:center">ヨミトリ v1.0</p>`;
+
+  view.querySelectorAll(".seg button").forEach(b => b.onclick = () => { addMode = b.dataset.m; renderManage(); });
+  document.getElementById("addForm").addEventListener("submit", onAdd);
+  view.querySelectorAll(".feed .del").forEach(b => b.onclick = () => {
+    if(!b.classList.contains("confirm")){ b.classList.add("confirm"); b.textContent = "本当に削除"; setTimeout(() => { if(b.isConnected){ b.classList.remove("confirm"); b.textContent = "削除"; } }, 3000); return; }
+    const id = b.closest(".feed").dataset.id;
+    S.feeds = S.feeds.filter(f => f.id !== id); delete S.cache[id];
+    if(filterFeed === id) filterFeed = "all";
+    save(); renderManage();
+  });
+  document.getElementById("uo").onchange = e => { S.prefs.unreadOnly = e.target.checked; save(); };
+  document.getElementById("px").onchange = e => { S.prefs.customProxy = e.target.value.trim(); save(); toast("保存しました"); };
+  document.getElementById("exp").onclick = async () => {
+    const data = JSON.stringify({ v: 1, feeds: S.feeds, stars: S.stars });
+    try{ await navigator.clipboard.writeText(data); toast("コピーしました"); }
+    catch(e){ const t = document.getElementById("impText"); t.hidden = false; t.value = data; t.select(); toast("選択してコピーしてください"); }
+  };
+  document.getElementById("imp").onclick = () => {
+    const t = document.getElementById("impText");
+    if(t.hidden || !t.value.trim()){ t.hidden = false; t.value = ""; t.focus(); return; }
+    try{
+      const d = JSON.parse(t.value);
+      if(!Array.isArray(d.feeds)) throw 0;
+      const have = new Set(S.feeds.map(f => f.url));
+      d.feeds.forEach(f => { if(f && f.url && !have.has(f.url)) S.feeds.push(Object.assign({}, f, { id: uid() })); });
+      Object.assign(S.stars, d.stars || {});
+      save(); toast("復元しました"); renderManage(); refreshAll();
+    }catch(e){ toast("データの形式が正しくありません"); }
+  };
+}
+
+async function onAdd(e){
+  e.preventDefault();
+  const msg = document.getElementById("addMsg");
+  const btn = document.getElementById("addBtn");
+  const nm = (document.getElementById("nm").value || "").trim();
+  msg.className = "msg"; msg.textContent = "";
+  let feed;
+  if(addMode === "keyword"){
+    const q = document.getElementById("kw").value.trim();
+    if(!q){ msg.className = "msg err"; msg.textContent = "キーワードを入力してください"; return; }
+    const lang = document.getElementById("lang").value;
+    if(S.feeds.some(f => f.type === "keyword" && f.q === q && f.lang === lang)){ msg.className = "msg err"; msg.textContent = "同じキーワードが登録済みです"; return; }
+    feed = { id: uid(), type: "keyword", name: nm || q + (lang === "en" ? " (EN)" : ""), q, lang, url: gnews(q, lang) };
+  }else{
+    let u = document.getElementById("url").value.trim();
+    if(!u){ msg.className = "msg err"; msg.textContent = "URLを入力してください"; return; }
+    if(!/^https?:\/\//i.test(u)) u = "https://" + u;
+    try{ new URL(u); }catch(_){ msg.className = "msg err"; msg.textContent = "URLの形式が正しくありません"; return; }
+    feed = { id: uid(), type: "url", name: nm, url: u };
+  }
+  btn.disabled = true; btn.textContent = "読み込み中…";
+  try{
+    const r = await loadFeedUrl(feed.url);
+    if(feed.type === "url"){
+      feed.url = r.feedUrl;
+      if(S.feeds.some(f => f.url === feed.url)) throw new Error("このフィードは登録済みです");
+      if(!feed.name) feed.name = r.title || new URL(feed.url).hostname;
+    }
+    S.feeds.push(feed);
+    storeItems(feed, r.items);
+    save();
+    renderManage();
+    const m2 = document.getElementById("addMsg");
+    m2.className = "msg ok"; m2.textContent = `「${feed.name}」を追加しました（${r.items.length}件）`;
+  }catch(err){
+    btn.disabled = false; btn.textContent = "追加して読み込む";
+    msg.className = "msg err";
+    msg.textContent = (err.message && /登録済み|見つかりません|解析/.test(err.message)) ? err.message : "読み込めませんでした。URLと通信状況を確認してください。";
+  }
+}
+
+/* ============ イベント ============ */
+view.addEventListener("click", e => {
+  const star = e.target.closest(".star");
+  const row = e.target.closest(".item");
+  if(!row) return;
+  const id = row.dataset.id;
+  const it = currentList.find(i => i.id === id) || S.stars[id];
+  if(star){
+    e.preventDefault();
+    if(S.stars[id]){ delete S.stars[id]; star.setAttribute("aria-pressed","false"); if(tab === "stars") renderStars(); }
+    else if(it){ S.stars[id] = Object.assign({}, it, { feedName: it.source || feedName(it.feedId) || it.feedName || "", starredAt: Date.now() }); star.setAttribute("aria-pressed","true"); }
+    save(); return;
+  }
+  if(e.target.closest("a")){
+    readSet.add(id); row.classList.add("read"); save();
+  }
+});
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  tab = b.dataset.tab; if(tab !== "feed") searchResult = null;
+  window.scrollTo(0,0); render();
+});
+document.getElementById("refreshBtn").onclick = () => {
+  if(tab === "feed" && searchResult) runSearch(searchResult.q, searchResult.lang);
+  else refreshAll();
+};
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState === "visible" && Date.now() - S.lastRefresh > AUTO_REFRESH_MIN * 60000) refreshAll();
+});
+
+/* ============ 起動 ============ */
+load();
+render();
+if(Date.now() - S.lastRefresh > AUTO_REFRESH_MIN * 60000) refreshAll();
+if("serviceWorker" in navigator && location.protocol.startsWith("http")){
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+</script>
+</body>
+</html>
