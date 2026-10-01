@@ -164,6 +164,7 @@ const PROXIES = [
   u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
   u => "https://corsproxy.io/?url=" + encodeURIComponent(u),
   u => "https://api.codetabs.com/v1/proxy/?quest=" + encodeURIComponent(u),
+  u => "https://thingproxy.freeboard.io/fetch/" + u,
 ];
 
 /* ============ 状態 ============ */
@@ -190,7 +191,7 @@ function save(){
 }
 function seed(){
   S.feeds = [
-    { id: uid(), type: "keyword", name: "医療DX", q: "医療DX", lang: "ja", url: gnews("医療DX","ja") },
+    { id: uid(), type: "keyword", name: "医療DX", q: "医療DX", lang: "ja", engine: "both" },
     { id: uid(), type: "url", name: "NHKニュース 主要", url: "https://www3.nhk.or.jp/rss/news/cat0.xml" }
   ];
 }
@@ -199,6 +200,18 @@ function gnews(q, lang){
   return lang === "en"
     ? "https://news.google.com/rss/search?q=" + encodeURIComponent(q) + "&hl=en-US&gl=US&ceid=US:en"
     : "https://news.google.com/rss/search?q=" + encodeURIComponent(q) + "&hl=ja&gl=JP&ceid=JP:ja";
+}
+function bnews(q, lang){
+  return "https://www.bing.com/news/search?q=" + encodeURIComponent(q) + "&format=RSS&setmkt=" + (lang === "en" ? "en-US" : "ja-JP");
+}
+// キーワードフィードが実際に読みに行くURL一覧（情報源設定に応じてGoogle/Bingを組み合わせる）
+function feedSources(f){
+  if(f.type === "url") return [{ label: "", url: f.url }];
+  const engine = f.engine || "both";
+  const list = [];
+  if(engine !== "bing") list.push({ label: "Google", url: gnews(f.q, f.lang) });
+  if(engine !== "google") list.push({ label: "Bing", url: bnews(f.q, f.lang) });
+  return list;
 }
 
 /* ============ 取得・解析 ============ */
@@ -306,6 +319,29 @@ async function loadFeedUrl(url){
   return { feedUrl: found, ...parsed };
 }
 
+async function loadFeedSources(feed){
+  const sources = feedSources(feed);
+  const results = await Promise.allSettled(sources.map(s => loadFeedUrl(s.url)));
+  const map = new Map();
+  const errors = [];
+  let ok = 0;
+  results.forEach((r, i) => {
+    if(r.status === "fulfilled"){
+      ok++;
+      r.value.items.forEach(it => {
+        const key = it.link || it.title;
+        if(!map.has(key)) map.set(key, Object.assign({}, it, { source: it.source || sources[i].label }));
+      });
+    }else{
+      errors.push({ label: sources[i].label || "フィード", message: String((r.reason && r.reason.message) || r.reason) });
+    }
+  });
+  if(ok === 0){
+    throw new Error(errors.map(e => e.label ? `${e.label}: ${e.message}` : e.message).join(" / ") || "取得失敗");
+  }
+  return { items: [...map.values()], errors };
+}
+
 function storeItems(feed, items){
   const prev = (S.cache[feed.id] && S.cache[feed.id].items) || [];
   const map = new Map();
@@ -323,11 +359,12 @@ async function refreshAll(){
     while(queue.length){
       const f = queue.shift();
       try{
-        const r = await loadFeedUrl(f.url);
+        const r = await loadFeedSources(f);
         storeItems(f, r.items);
+        S.cache[f.id].warn = r.errors.length ? r.errors.map(e => e.label).join("・") + "は取得できませんでした" : "";
       }catch(e){
         fail++;
-        S.cache[f.id] = Object.assign({ items: [] }, S.cache[f.id], { err: String(e.message || e) });
+        S.cache[f.id] = Object.assign({ items: [] }, S.cache[f.id], { err: String(e.message || e), warn: "" });
       }
       done++;
       statusText = `更新中… ${done}/${S.feeds.length}`;
@@ -473,14 +510,15 @@ function renderFeedBody(){
 }
 
 async function runSearch(q, lang){
-  searchResult = { q, lang, items: [], loading: true, error: "" };
+  searchResult = { q, lang, items: [], loading: true, error: "", warn: "" };
   renderSearch();
   try{
-    const r = await loadFeedUrl(gnews(q, lang));
+    const r = await loadFeedSources({ type: "keyword", q, lang, engine: "both" });
     if(!searchResult || searchResult.q !== q) return;
     searchResult.items = r.items.sort((a,b) => b.ts - a.ts);
+    searchResult.warn = r.errors.length ? r.errors.map(e => e.label).join("・") + "の結果は取得できませんでした" : "";
   }catch(e){
-    if(searchResult) searchResult.error = "検索結果を取得できませんでした。通信状況を確認してもう一度お試しください。";
+    if(searchResult) searchResult.error = "検索結果を取得できませんでした。回線が混み合っている可能性があります。少し時間をおいてもう一度お試しください。";
   }
   if(searchResult){ searchResult.loading = false; if(tab === "feed") renderSearch(); }
 }
@@ -489,13 +527,13 @@ function renderSearch(){
   const r = searchResult;
   const exists = S.feeds.some(f => f.type === "keyword" && f.q === r.q && f.lang === r.lang);
   let body;
-  if(r.loading) body = `<div class="empty">「${esc(r.q)}」を検索しています…</div>`;
+  if(r.loading) body = `<div class="empty">「${esc(r.q)}」をGoogle+Bingで検索しています…</div>`;
   else if(r.error) body = `<div class="empty"><strong>取得できませんでした</strong>${esc(r.error)}</div>`;
   else if(!r.items.length) body = `<div class="empty"><strong>見つかりませんでした</strong>別のキーワードをお試しください。</div>`;
-  else body = `<div class="list">${r.items.map(it => itemHTML(Object.assign({ feedName: "Googleニュース" }, it))).join("")}</div>`;
+  else body = `<div class="list">${r.items.map(it => itemHTML(Object.assign({ feedName: "ニュース検索" }, it))).join("")}</div>`;
   currentList = r.items;
   view.innerHTML = `
-    <div class="status"><span>「${esc(r.q)}」のニュース検索 ${r.items.length ? r.items.length + "件" : ""}</span>
+    <div class="status"><span>「${esc(r.q)}」のニュース検索（Google+Bing）${r.items.length ? " " + r.items.length + "件" : ""}${r.warn ? "・" + esc(r.warn) : ""}</span>
       <span style="display:flex;gap:14px">
         <button id="langTg">${r.lang === "ja" ? "英語で検索" : "日本語で検索"}</button>
         <button id="backTl">タイムラインに戻る</button></span></div>
@@ -506,7 +544,7 @@ function renderSearch(){
   document.getElementById("langTg").onclick = () => runSearch(r.q, r.lang === "ja" ? "en" : "ja");
   const sk = document.getElementById("saveKw");
   if(sk) sk.onclick = () => {
-    const f = { id: uid(), type: "keyword", name: r.q + (r.lang === "en" ? " (EN)" : ""), q: r.q, lang: r.lang, url: gnews(r.q, r.lang) };
+    const f = { id: uid(), type: "keyword", name: r.q + (r.lang === "en" ? " (EN)" : ""), q: r.q, lang: r.lang, engine: "both" };
     S.feeds.push(f);
     if(r.items.length) storeItems(f, r.items);
     save(); toast("「" + f.name + "」を追加しました");
@@ -537,9 +575,14 @@ function renderManage(){
       <label>キーワード<input class="field" id="kw" placeholder="例：電子カルテ 更新" autocomplete="off"></label>
       <div class="row">
         <label>言語<select class="field" id="lang"><option value="ja">日本語ニュース</option><option value="en">英語ニュース</option></select></label>
-        <label>表示名（任意）<input class="field" id="nm" placeholder="空欄ならキーワード"></label>
+        <label>情報源<select class="field" id="engine">
+          <option value="both">Google + Bing（推奨）</option>
+          <option value="google">Googleニュースのみ</option>
+          <option value="bing">Bing Newsのみ</option>
+        </select></label>
       </div>
-      <p class="hint">Googleニュースから新着記事を集めます。スペース区切りで全部含む記事、「OR」でどれかを含む記事、「-語」で除外できます。</p>
+      <label>表示名（任意）<input class="field" id="nm" placeholder="空欄ならキーワード"></label>
+      <p class="hint">GoogleとBing、2つのニュース検索から新着記事を集めて重複を除いて表示します。片方が混雑していてももう片方の結果を表示できます。スペース区切りで全部含む記事、「OR」でどれかを含む記事、「-語」で除外できます。</p>
     ` : `
       <label>URL<input class="field" id="url" type="url" inputmode="url" placeholder="https://example.com/feed または サイトのURL" autocomplete="off"></label>
       <label>表示名（任意）<input class="field" id="nm" placeholder="空欄ならフィードのタイトル"></label>
@@ -553,12 +596,13 @@ function renderManage(){
   <div class="card"><div class="feeds">
     ${S.feeds.length ? S.feeds.map(f => {
       const c = S.cache[f.id];
-      const sub = f.type === "keyword" ? `Googleニュース・${f.lang === "en" ? "英語" : "日本語"}：${f.q}` : f.url;
+      const engineLabel = { both: "Google+Bing", google: "Google", bing: "Bing" }[f.engine || "both"];
+      const sub = f.type === "keyword" ? `${engineLabel}・${f.lang === "en" ? "英語" : "日本語"}：${f.q}` : f.url;
       return `<div class="feed" data-id="${f.id}">
         <div class="info">
           <div class="n"><span class="badge">${f.type === "keyword" ? "KW" : "URL"}</span>${esc(f.name)}</div>
           <div class="u">${esc(sub)}</div>
-          ${c && c.err ? `<div class="e">取得エラー：${esc(c.err)}</div>` : c ? `<div class="u">${c.items.length}件・${esc(ago(c.at))}に取得</div>` : ""}
+          ${c && c.err ? `<div class="e">取得エラー：${esc(c.err)}</div>` : c ? `<div class="u">${c.items.length}件・${esc(ago(c.at))}に取得${c.warn ? "・" + esc(c.warn) : ""}</div>` : ""}
         </div>
         <button class="del" type="button">削除</button>
       </div>`; }).join("") : `<p class="hint">まだありません。</p>`}
@@ -581,7 +625,7 @@ function renderManage(){
     <textarea class="field" id="impText" rows="3" style="height:auto;padding:10px" placeholder="コピーしたデータをここに貼り付けて「貼り付けて復元」" hidden></textarea>
     <p class="hint">別のスマホへの移行用です。フィードとお気に入りが対象です。</p>
   </div>
-  <p class="hint" style="margin-top:18px;text-align:center">ヨミトリ v1.0</p>`;
+  <p class="hint" style="margin-top:18px;text-align:center">ヨミトリ v1.1</p>`;
 
   view.querySelectorAll(".seg button").forEach(b => b.onclick = () => { addMode = b.dataset.m; renderManage(); });
   document.getElementById("addForm").addEventListener("submit", onAdd);
@@ -605,8 +649,9 @@ function renderManage(){
     try{
       const d = JSON.parse(t.value);
       if(!Array.isArray(d.feeds)) throw 0;
-      const have = new Set(S.feeds.map(f => f.url));
-      d.feeds.forEach(f => { if(f && f.url && !have.has(f.url)) S.feeds.push(Object.assign({}, f, { id: uid() })); });
+      const feedKey = f => f.type === "keyword" ? "kw:" + f.q + ":" + f.lang + ":" + (f.engine || "both") : "url:" + f.url;
+      const have = new Set(S.feeds.map(feedKey));
+      d.feeds.forEach(f => { if(f && (f.type === "url" ? f.url : f.q) && !have.has(feedKey(f))) S.feeds.push(Object.assign({}, f, { id: uid() })); });
       Object.assign(S.stars, d.stars || {});
       save(); toast("復元しました"); renderManage(); refreshAll();
     }catch(e){ toast("データの形式が正しくありません"); }
@@ -624,8 +669,9 @@ async function onAdd(e){
     const q = document.getElementById("kw").value.trim();
     if(!q){ msg.className = "msg err"; msg.textContent = "キーワードを入力してください"; return; }
     const lang = document.getElementById("lang").value;
-    if(S.feeds.some(f => f.type === "keyword" && f.q === q && f.lang === lang)){ msg.className = "msg err"; msg.textContent = "同じキーワードが登録済みです"; return; }
-    feed = { id: uid(), type: "keyword", name: nm || q + (lang === "en" ? " (EN)" : ""), q, lang, url: gnews(q, lang) };
+    const engine = document.getElementById("engine").value;
+    if(S.feeds.some(f => f.type === "keyword" && f.q === q && f.lang === lang && (f.engine || "both") === engine)){ msg.className = "msg err"; msg.textContent = "同じキーワードが登録済みです"; return; }
+    feed = { id: uid(), type: "keyword", name: nm || q + (lang === "en" ? " (EN)" : ""), q, lang, engine };
   }else{
     let u = document.getElementById("url").value.trim();
     if(!u){ msg.className = "msg err"; msg.textContent = "URLを入力してください"; return; }
@@ -635,22 +681,30 @@ async function onAdd(e){
   }
   btn.disabled = true; btn.textContent = "読み込み中…";
   try{
-    const r = await loadFeedUrl(feed.url);
+    let r, extra = "";
     if(feed.type === "url"){
+      r = await loadFeedUrl(feed.url);
       feed.url = r.feedUrl;
       if(S.feeds.some(f => f.url === feed.url)) throw new Error("このフィードは登録済みです");
       if(!feed.name) feed.name = r.title || new URL(feed.url).hostname;
+    }else{
+      r = await loadFeedSources(feed);
+      if(r.errors.length) extra = `（${r.errors.map(e => e.label).join("・")}は取得できませんでした）`;
     }
     S.feeds.push(feed);
     storeItems(feed, r.items);
     save();
     renderManage();
     const m2 = document.getElementById("addMsg");
-    m2.className = "msg ok"; m2.textContent = `「${feed.name}」を追加しました（${r.items.length}件）`;
+    m2.className = "msg ok"; m2.textContent = `「${feed.name}」を追加しました（${r.items.length}件）${extra}`;
   }catch(err){
     btn.disabled = false; btn.textContent = "追加して読み込む";
     msg.className = "msg err";
-    msg.textContent = (err.message && /登録済み|見つかりません|解析/.test(err.message)) ? err.message : "読み込めませんでした。URLと通信状況を確認してください。";
+    if(addMode === "url"){
+      msg.textContent = (err.message && /登録済み|見つかりません|解析/.test(err.message)) ? err.message : "読み込めませんでした。URLと通信状況を確認してください。";
+    }else{
+      msg.textContent = "取得できませんでした。回線が混み合っている可能性があります。少し時間をおいてもう一度お試しください。";
+    }
   }
 }
 
