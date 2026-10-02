@@ -224,8 +224,8 @@ async function limited(fn){
   finally{ activeReq--; const n = reqWaiters.shift(); if(n) n(); }
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-function fetchText(url){ return limited(() => fetchTextInner(url)); }
-async function fetchTextInner(url){
+function fetchText(url, quick){ return limited(() => fetchTextInner(url, quick)); }
+async function fetchTextInner(url, quick){
   const order = [];
   if(S.prefs.customProxy.trim()){
     const tpl = S.prefs.customProxy.trim();
@@ -234,12 +234,13 @@ async function fetchTextInner(url){
   const pref = S.prefs.proxyIdx || 0;
   order.push({i:pref, f:PROXIES[pref]});
   PROXIES.forEach((f,i) => { if(i !== pref) order.push({i, f}); });
+  if(quick) order.length = 1;              // 定番URLの探索は1回だけ・短時間で切り上げる
   let lastErr;
   for(const p of order){
-    const attempts = p.i === -1 ? 3 : 1;   // 自分の中継は失敗しても数回やり直す
+    const attempts = quick ? 1 : (p.i === -1 ? 3 : 1);   // 自分の中継は失敗しても数回やり直す
     for(let a = 0; a < attempts; a++){
       const ctl = new AbortController();
-      const tm = setTimeout(() => ctl.abort(), p.i === -1 ? 25000 : 12000);
+      const tm = setTimeout(() => ctl.abort(), quick ? 8000 : (p.i === -1 ? 25000 : 12000));
       try{
         const res = await fetch(p.f(url), { signal: ctl.signal, cache: "no-store" });
         clearTimeout(tm);
@@ -323,8 +324,64 @@ function discover(html, pageUrl){
   try{ return new URL(l.getAttribute("href"), pageUrl).href; }catch(e){ return null; }
 }
 
-async function loadFeedUrl(url){
+// 和暦・西暦の日付表記を拾う（令和8年8月1日 / 2026年8月1日 / 2026/8/1）
+function parseJaDate(s){
+  let m = s.match(/(令和|平成)\s*(\d{1,2}|元)\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+  if(m){
+    const n = m[2] === "元" ? 1 : +m[2];
+    return new Date((m[1] === "令和" ? 2018 : 1988) + n, +m[3] - 1, +m[4]).getTime();
+  }
+  m = s.match(/(20\d{2})\s*[年\/.\-]\s*(\d{1,2})\s*[月\/.\-]\s*(\d{1,2})/);
+  if(m) return new Date(+m[1], +m[2] - 1, +m[3]).getTime();
+  return 0;
+}
+
+// RSSが無いページ向け：本文中のリンクを記事として取り込む
+function scrapePage(html, pageUrl){
+  const d = new DOMParser().parseFromString(html, "text/html");
+  const title = (d.querySelector("title") ? d.querySelector("title").textContent : "").replace(/\s+/g, " ").trim();
+  const root = d.querySelector("main, #main, #contents, #content, .l-contents, article") || d.body;
+  if(!root) return { title, items: [] };
+  const skip = "nav, header, footer, aside, .breadcrumb, #header, #footer, #gnav, #breadcrumb, .global-nav, .l-side";
+  const seen = new Map();
+  root.querySelectorAll("a[href]").forEach(a => {
+    const href = a.getAttribute("href") || "";
+    if(!href || href.startsWith("#") || /^(javascript|mailto|tel):/i.test(href)) return;
+    if(a.closest(skip)) return;
+    let link;
+    try{ link = new URL(href, pageUrl).href.split("#")[0]; }catch(_){ return; }
+    if(link === pageUrl) return;
+    const text = a.textContent.replace(/\s+/g, " ").trim();
+    const rowEl = a.closest("li, tr, dd, dt, p") || a.closest("td");
+    const rowText = rowEl ? rowEl.textContent.replace(/\s+/g, " ").trim() : text;
+    let title = text;
+    if(text.length < 12){            // 「資料」「議事録」だけのリンクは、行全体の文字を題名にする
+      title = text && rowText !== text ? rowText.slice(0, 100) + "（" + text + "）" : rowText;
+    }
+    if(title.length < 6) return;
+    if(!seen.has(link)) seen.set(link, { title: title.slice(0, 120), ts: parseJaDate(rowText) });
+  });
+  const items = [...seen.entries()].slice(0, 80).map(([link, v]) => ({
+    id: link, title: v.title, link, ts: v.ts, summary: "", source: ""
+  }));
+  return { title, items };
+}
+
+// ページ型フィードの日付を補う（日付が読めない記事は初めて見つけた時刻にする）
+function stampPageItems(feed, items){
+  const prev = new Map(((S.cache[feed.id] && S.cache[feed.id].items) || []).map(i => [i.id, i.ts]));
+  const now = Date.now();
+  return items.map((it, idx) => it.ts ? it : Object.assign({}, it, { ts: prev.get(it.id) || (now - idx * 1000) }));
+}
+
+async function loadFeedUrl(url, opts){
+  opts = opts || {};
   const text = await fetchText(url);
+  if(opts.page){
+    const sp = scrapePage(text, url);
+    if(!sp.items.length) throw new Error("ページから記事を取り出せません");
+    return { feedUrl: url, mode: "page", ...sp };
+  }
   let parsed = parseFeed(text, url);
   if(parsed) return { feedUrl: url, ...parsed };
   const found = discover(text, url);
@@ -334,31 +391,39 @@ async function loadFeedUrl(url){
     if(!parsed) throw new Error("フィードを解析できません");
     return { feedUrl: found, ...parsed };
   }
-  // 案内タグが無いサイト向けに、定番のフィードURLを順に試す
-  let origin = "";
-  try{ origin = new URL(url).origin; }catch(_){}
-  const paths = ["/feed", "/feed/", "/rss", "/rss/", "/rss.xml", "/atom.xml", "/index.xml", "/feed.xml", "/feeds/posts/default"];
-  for(const p of paths){
-    const cand = origin + p;
-    try{
-      const t3 = await fetchText(cand);
-      const r3 = parseFeed(t3, cand);
-      if(r3 && r3.items.length) return { feedUrl: cand, ...r3 };
-    }catch(_){}
+  // 案内タグが無いトップページ型のサイトは、定番のフィードURLを並行して試す
+  let u;
+  try{ u = new URL(url); }catch(_){ u = null; }
+  if(u && u.pathname.split("/").filter(Boolean).length <= 1){
+    const paths = ["/feed", "/rss", "/rss.xml", "/atom.xml", "/index.xml", "/feed.xml"];
+    const tries = await Promise.all(paths.map(async p => {
+      const cand = u.origin + p;
+      try{
+        const t3 = await fetchText(cand, true);
+        const r3 = parseFeed(t3, cand);
+        return r3 && r3.items.length ? { feedUrl: cand, ...r3 } : null;
+      }catch(_){ return null; }
+    }));
+    const hit = tries.find(Boolean);
+    if(hit) return hit;
   }
+  // それでも無ければ、ページ内のリンク一覧を記事として取り込む
+  const sp = scrapePage(text, url);
+  if(sp.items.length) return { feedUrl: url, mode: "page", ...sp };
   throw new Error("RSS/Atomフィードが見つかりません");
 }
 
 async function loadFeedSources(feed){
   const sources = feedSources(feed);
-  const results = await Promise.allSettled(sources.map(s => loadFeedUrl(s.url)));
+  const results = await Promise.allSettled(sources.map(s => loadFeedUrl(s.url, { page: feed.mode === "page" })));
   const map = new Map();
   const errors = [];
   let ok = 0;
   results.forEach((r, i) => {
     if(r.status === "fulfilled"){
       ok++;
-      r.value.items.forEach(it => {
+      const got = feed.mode === "page" ? stampPageItems(feed, r.value.items) : r.value.items;
+      got.forEach(it => {
         const key = it.link || it.title;
         if(!map.has(key)) map.set(key, Object.assign({}, it, { source: it.source || sources[i].label }));
       });
@@ -616,7 +681,7 @@ function renderManage(){
     ` : `
       <label>URL<input class="field" id="url" type="url" inputmode="url" placeholder="https://example.com/feed または サイトのURL" autocomplete="off"></label>
       <label>表示名（任意）<input class="field" id="nm" placeholder="空欄ならフィードのタイトル"></label>
-      <p class="hint">RSS/AtomのURLのほか、サイトのトップページURLでもフィードを自動で探します。</p>
+      <p class="hint">RSS/AtomのURLのほか、サイトのトップページURLでもフィードを自動で探します。RSSが無いページ（審議会の会議ページなど）は、ページ内のリンク一覧を記事として取り込みます（「PAGE」と表示）。</p>
     `}
     <button class="btn" id="addBtn" type="submit">追加して読み込む</button>
     <p class="msg" id="addMsg" aria-live="polite"></p>
@@ -630,7 +695,7 @@ function renderManage(){
       const sub = f.type === "keyword" ? `${engineLabel}・${f.lang === "en" ? "英語" : "日本語"}：${f.q}` : f.url;
       return `<div class="feed" data-id="${f.id}">
         <div class="info">
-          <div class="n"><span class="badge">${f.type === "keyword" ? "KW" : "URL"}</span>${esc(f.name)}</div>
+          <div class="n"><span class="badge">${f.type === "keyword" ? "KW" : f.mode === "page" ? "PAGE" : "URL"}</span>${esc(f.name)}</div>
           <div class="u">${esc(sub)}</div>
           ${c && c.err ? `<div class="e">取得エラー：${esc(c.err)}</div>` : c ? `<div class="u">${c.items.length}件・${esc(ago(c.at))}に取得${c.warn ? "・" + esc(c.warn) : ""}</div>` : ""}
         </div>
@@ -655,7 +720,7 @@ function renderManage(){
     <textarea class="field" id="impText" rows="3" style="height:auto;padding:10px" placeholder="コピーしたデータをここに貼り付けて「貼り付けて復元」" hidden></textarea>
     <p class="hint">別のスマホへの移行用です。フィードとお気に入りが対象です。</p>
   </div>
-  <p class="hint" style="margin-top:18px;text-align:center">ヨミトリ v1.3</p>`;
+  <p class="hint" style="margin-top:18px;text-align:center">ヨミトリ v1.4</p>`;
 
   view.querySelectorAll(".seg button").forEach(b => b.onclick = () => { addMode = b.dataset.m; renderManage(); });
   document.getElementById("addForm").addEventListener("submit", onAdd);
@@ -717,6 +782,11 @@ async function onAdd(e){
       feed.url = r.feedUrl;
       if(S.feeds.some(f => f.url === feed.url)) throw new Error("このフィードは登録済みです");
       if(!feed.name) feed.name = r.title || new URL(feed.url).hostname;
+      if(r.mode === "page"){
+        feed.mode = "page";
+        r.items = stampPageItems(feed, r.items);
+        extra = "（RSSが無いため、ページ内のリンクを記事として取り込みます）";
+      }
     }else{
       r = await loadFeedSources(feed);
       if(r.errors.length) extra = `（${r.errors.map(e => e.label).join("・")}は取得できませんでした）`;
