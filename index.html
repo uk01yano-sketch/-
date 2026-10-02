@@ -312,11 +312,25 @@ async function loadFeedUrl(url){
   let parsed = parseFeed(text, url);
   if(parsed) return { feedUrl: url, ...parsed };
   const found = discover(text, url);
-  if(!found) throw new Error("RSS/Atomフィードが見つかりません");
-  const t2 = await fetchText(found);
-  parsed = parseFeed(t2, found);
-  if(!parsed) throw new Error("フィードを解析できません");
-  return { feedUrl: found, ...parsed };
+  if(found){
+    const t2 = await fetchText(found);
+    parsed = parseFeed(t2, found);
+    if(!parsed) throw new Error("フィードを解析できません");
+    return { feedUrl: found, ...parsed };
+  }
+  // 案内タグが無いサイト向けに、定番のフィードURLを順に試す
+  let origin = "";
+  try{ origin = new URL(url).origin; }catch(_){}
+  const paths = ["/feed", "/feed/", "/rss", "/rss/", "/rss.xml", "/atom.xml", "/index.xml", "/feed.xml", "/feeds/posts/default"];
+  for(const p of paths){
+    const cand = origin + p;
+    try{
+      const t3 = await fetchText(cand);
+      const r3 = parseFeed(t3, cand);
+      if(r3 && r3.items.length) return { feedUrl: cand, ...r3 };
+    }catch(_){}
+  }
+  throw new Error("RSS/Atomフィードが見つかりません");
 }
 
 async function loadFeedSources(feed){
@@ -625,7 +639,7 @@ function renderManage(){
     <textarea class="field" id="impText" rows="3" style="height:auto;padding:10px" placeholder="コピーしたデータをここに貼り付けて「貼り付けて復元」" hidden></textarea>
     <p class="hint">別のスマホへの移行用です。フィードとお気に入りが対象です。</p>
   </div>
-  <p class="hint" style="margin-top:18px;text-align:center">ヨミトリ v1.1</p>`;
+  <p class="hint" style="margin-top:18px;text-align:center">ヨミトリ v1.2</p>`;
 
   view.querySelectorAll(".seg button").forEach(b => b.onclick = () => { addMode = b.dataset.m; renderManage(); });
   document.getElementById("addForm").addEventListener("submit", onAdd);
