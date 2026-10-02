@@ -215,7 +215,17 @@ function feedSources(f){
 }
 
 /* ============ 取得・解析 ============ */
-async function fetchText(url){
+// 同時アクセス数を絞る（Googleに弾かれにくくする）
+let activeReq = 0; const reqWaiters = [];
+async function limited(fn){
+  if(activeReq >= 3) await new Promise(r => reqWaiters.push(r));
+  activeReq++;
+  try{ return await fn(); }
+  finally{ activeReq--; const n = reqWaiters.shift(); if(n) n(); }
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function fetchText(url){ return limited(() => fetchTextInner(url)); }
+async function fetchTextInner(url){
   const order = [];
   if(S.prefs.customProxy.trim()){
     const tpl = S.prefs.customProxy.trim();
@@ -226,17 +236,23 @@ async function fetchText(url){
   PROXIES.forEach((f,i) => { if(i !== pref) order.push({i, f}); });
   let lastErr;
   for(const p of order){
-    const ctl = new AbortController();
-    const tm = setTimeout(() => ctl.abort(), 12000);
-    try{
-      const res = await fetch(p.f(url), { signal: ctl.signal, cache: "no-store" });
-      clearTimeout(tm);
-      if(!res.ok) throw new Error("HTTP " + res.status);
-      const txt = await res.text();
-      if(!txt || txt.length < 40) throw new Error("空の応答");
-      if(p.i >= 0 && p.i !== S.prefs.proxyIdx){ S.prefs.proxyIdx = p.i; }
-      return txt;
-    }catch(e){ clearTimeout(tm); lastErr = e; }
+    const attempts = p.i === -1 ? 3 : 1;   // 自分の中継は失敗しても数回やり直す
+    for(let a = 0; a < attempts; a++){
+      const ctl = new AbortController();
+      const tm = setTimeout(() => ctl.abort(), p.i === -1 ? 25000 : 12000);
+      try{
+        const res = await fetch(p.f(url), { signal: ctl.signal, cache: "no-store" });
+        clearTimeout(tm);
+        if(!res.ok) throw new Error("HTTP " + res.status);
+        const txt = await res.text();
+        if(!txt || txt.length < 40) throw new Error("空の応答");
+        if(p.i >= 0 && p.i !== S.prefs.proxyIdx){ S.prefs.proxyIdx = p.i; }
+        return txt;
+      }catch(e){
+        clearTimeout(tm); lastErr = e;
+        if(a < attempts - 1) await sleep(1500 * (a + 1));
+      }
+    }
   }
   throw lastErr || new Error("取得失敗");
 }
@@ -639,7 +655,7 @@ function renderManage(){
     <textarea class="field" id="impText" rows="3" style="height:auto;padding:10px" placeholder="コピーしたデータをここに貼り付けて「貼り付けて復元」" hidden></textarea>
     <p class="hint">別のスマホへの移行用です。フィードとお気に入りが対象です。</p>
   </div>
-  <p class="hint" style="margin-top:18px;text-align:center">ヨミトリ v1.2</p>`;
+  <p class="hint" style="margin-top:18px;text-align:center">ヨミトリ v1.3</p>`;
 
   view.querySelectorAll(".seg button").forEach(b => b.onclick = () => { addMode = b.dataset.m; renderManage(); });
   document.getElementById("addForm").addEventListener("submit", onAdd);
